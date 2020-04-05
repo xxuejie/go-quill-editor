@@ -77,3 +77,17 @@ func TestDeleteCommand(t *testing.T) {
 			debugDeltaString(t, expectedChange), debugDeltaString(t, e.Changes()))
 	}
 }
+
+func TestDeleteFromMultiLineCommand(t *testing.T) {
+	content := *delta.New(nil).Insert("1 45 1\n2 48 21\n3 45 1\n4 48 43\n5 45 1\n6 48 20\n", nil)
+	e := NewDeltaEditor(content)
+	err := Run(",x/^5|6/+-d", e)
+	if err != nil {
+		t.Fatal(err)
+	}
+	expectedContent := "1 45 1\n2 48 21\n3 45 1\n4 48 43\n"
+	actualContent := e.String()
+	if actualContent != expectedContent {
+		t.Fatalf("Invalid result: expected: \"%s\", actual: \"%s\"", expectedContent, actualContent)
+	}
+}
