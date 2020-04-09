@@ -9,4 +9,5 @@ require (
 	github.com/as/text v0.7.0 // indirect
 	github.com/as/worm v0.6.7 // indirect
 	github.com/fmpwizard/go-quilljs-delta v0.0.6-0.20190628042138-9bdce66302c2
+	github.com/sergi/go-diff v1.1.0
 )
