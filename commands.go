@@ -15,16 +15,32 @@ const (
 	defAddrAll
 )
 
+type innerContext struct {
+	File    *innerFile
+	Printer io.Writer
+}
+
+func newInnerContext(context Context) (innerContext, error) {
+	innerFile, err := newInnerFile(context.File)
+	if err != nil {
+		return innerContext{}, err
+	}
+	return innerContext{
+		File:    innerFile,
+		Printer: context.Printer,
+	}, nil
+}
+
 type cmdtab struct {
-	cmdc    uint16                               // command character
-	text    bool                                 // takes a textual argument?
-	regexp  bool                                 // takes a regular expression?
-	addr    bool                                 // takes an address (m or t)?
-	defcmd  byte                                 // default command; 0 means none
-	defaddr defaultAddress                       // default address
-	count   byte                                 // takes a count
-	token   []byte                               // takes text terminated by one of these
-	fn      func(context Context, cmd Cmd) error // function to call
+	cmdc    uint16                                    // command character
+	text    bool                                      // takes a textual argument?
+	regexp  bool                                      // takes a regular expression?
+	addr    bool                                      // takes an address (m or t)?
+	defcmd  byte                                      // default command; 0 means none
+	defaddr defaultAddress                            // default address
+	count   byte                                      // takes a count
+	token   []byte                                    // takes text terminated by one of these
+	fn      func(context innerContext, cmd Cmd) error // function to call
 }
 
 var (
@@ -208,7 +224,7 @@ func cmdLookup(cmdc uint16) *cmdtab {
 	return nil
 }
 
-func cmdExec(c Cmd, context Context) error {
+func cmdExec(c Cmd, context innerContext) error {
 	ct := cmdLookup(c.cmdc)
 	if ct != nil && ct.defaddr != defAddrNo {
 		if c.addr == nil && c.cmdc != '\n' {
@@ -260,7 +276,7 @@ func cmdExec(c Cmd, context Context) error {
 	return nil
 }
 
-func cmdAddress(addr *Addr, context Context, sign int) ([]int64, error) {
+func cmdAddress(addr *Addr, context innerContext, sign int) ([]int64, error) {
 	a0, a1 := context.File.Dot()
 	result := []int64{a0, a1}
 	var err error
@@ -368,7 +384,7 @@ func cmdAddress(addr *Addr, context Context, sign int) ([]int64, error) {
 	return result, nil
 }
 
-func nlCmd(context Context, cmd Cmd) error {
+func nlCmd(context innerContext, cmd Cmd) error {
 	q0, q1 := context.File.Dot()
 	addr := []int64{q0, q1}
 	var err error
@@ -393,7 +409,7 @@ func nlCmd(context Context, cmd Cmd) error {
 	return nil
 }
 
-func aCmd(context Context, cmd Cmd) error {
+func aCmd(context innerContext, cmd Cmd) error {
 	_, q1 := context.File.Dot()
 	l := int64(0)
 	if len(cmd.text) > 0 {
@@ -406,12 +422,12 @@ func aCmd(context Context, cmd Cmd) error {
 	return nil
 }
 
-func cCmd(context Context, cmd Cmd) error {
+func cCmd(context innerContext, cmd Cmd) error {
 	q0, q1 := context.File.Dot()
 	return replaceText(context, q0, q1, []byte(cmd.text))
 }
 
-func dCmd(context Context, cmd Cmd) error {
+func dCmd(context innerContext, cmd Cmd) error {
 	q0, q1 := context.File.Dot()
 	if q1 > q0 {
 		context.File.Delete(q0, q1)
@@ -419,7 +435,7 @@ func dCmd(context Context, cmd Cmd) error {
 	return nil
 }
 
-func gCmd(context Context, cmd Cmd) error {
+func gCmd(context innerContext, cmd Cmd) error {
 	re, err := compileRegexp(cmd.re)
 	if err != nil {
 		return err
@@ -439,7 +455,7 @@ func gCmd(context Context, cmd Cmd) error {
 	return nil
 }
 
-func iCmd(context Context, cmd Cmd) error {
+func iCmd(context innerContext, cmd Cmd) error {
 	q0, _ := context.File.Dot()
 	l := int64(0)
 	if len(cmd.text) > 0 {
@@ -452,7 +468,7 @@ func iCmd(context Context, cmd Cmd) error {
 	return nil
 }
 
-func mCmd(context Context, cmd Cmd) error {
+func mCmd(context innerContext, cmd Cmd) error {
 	addr2, err := cmdAddress(cmd.mtaddr, context, 0)
 	if err != nil {
 		return err
@@ -479,7 +495,7 @@ func mCmd(context Context, cmd Cmd) error {
 	return nil
 }
 
-func sCmd(context Context, cmd Cmd) error {
+func sCmd(context innerContext, cmd Cmd) error {
 	re, err := compileRegexp(cmd.re)
 	if err != nil {
 		return err
@@ -569,7 +585,7 @@ func sCmd(context Context, cmd Cmd) error {
 	return nil
 }
 
-func tCmd(context Context, cmd Cmd) error {
+func tCmd(context innerContext, cmd Cmd) error {
 	addr2, err := cmdAddress(cmd.mtaddr, context, 0)
 	if err != nil {
 		return err
@@ -588,7 +604,7 @@ func tCmd(context Context, cmd Cmd) error {
 	return nil
 }
 
-func pCmd(context Context, cmd Cmd) error {
+func pCmd(context innerContext, cmd Cmd) error {
 	q0, q1 := context.File.Dot()
 	if context.Printer != nil {
 		reader := context.File.Reader(q0, q1)
@@ -601,7 +617,7 @@ func pCmd(context Context, cmd Cmd) error {
 	return nil
 }
 
-func xCmd(context Context, cmd Cmd) error {
+func xCmd(context innerContext, cmd Cmd) error {
 	if cmd.re != "" {
 		return looper(context, cmd, cmd.cmdc == uint16('x'))
 	} else {
@@ -609,7 +625,7 @@ func xCmd(context Context, cmd Cmd) error {
 	}
 }
 
-func eqCmd(context Context, cmd Cmd) error {
+func eqCmd(context innerContext, cmd Cmd) error {
 	var mode int
 	switch len(cmd.text) {
 	case 0:
@@ -630,7 +646,7 @@ func eqCmd(context Context, cmd Cmd) error {
 	return printPosn(context, mode)
 }
 
-func looper(context Context, cmd Cmd, isX bool) error {
+func looper(context innerContext, cmd Cmd, isX bool) error {
 	re, err := compileRegexp(cmd.re)
 	if err != nil {
 		return err
@@ -679,7 +695,7 @@ func looper(context Context, cmd Cmd, isX bool) error {
 	return loopCmd(context, *cmd.cmd, ranges)
 }
 
-func lineLooper(context Context, cmd Cmd) error {
+func lineLooper(context innerContext, cmd Cmd) error {
 	q0, q1 := context.File.Dot()
 	a3 := textRange{
 		q0: q0,
@@ -720,7 +736,7 @@ func lineLooper(context Context, cmd Cmd) error {
 	return loopCmd(context, *cmd.cmd, ranges)
 }
 
-func loopCmd(context Context, cmd Cmd, ranges []textRange) error {
+func loopCmd(context innerContext, cmd Cmd, ranges []textRange) error {
 	for _, r := range ranges {
 		context.File.Select(r.q0, r.q1)
 		err := cmdExec(cmd, context)
@@ -731,7 +747,7 @@ func loopCmd(context Context, cmd Cmd, ranges []textRange) error {
 	return nil
 }
 
-func regexpSearch(reStr string, context Context, start int64, end int64, sign int) ([]int64, error) {
+func regexpSearch(reStr string, context innerContext, start int64, end int64, sign int) ([]int64, error) {
 	re, err := compileRegexp(reStr)
 	if err != nil {
 		return nil, err
@@ -756,7 +772,7 @@ func regexpSearch(reStr string, context Context, start int64, end int64, sign in
 	return []int64{int64(location[0]) + start, int64(location[1]) + start}, nil
 }
 
-func extractLineAddress(context Context, lineNumber int64, sign int, currentAddress []int64) ([]int64, error) {
+func extractLineAddress(context innerContext, lineNumber int64, sign int, currentAddress []int64) ([]int64, error) {
 	q0, q1 := currentAddress[0], currentAddress[1]
 	fileLen := context.File.Len()
 	result := []int64{0, 0}
@@ -882,7 +898,7 @@ func compileRegexp(reStr string) (*regexp.Regexp, error) {
 	return regexp.Compile(fmt.Sprintf("(?m)%s", reStr))
 }
 
-func replaceText(context Context, q0 int64, q1 int64, data []byte) error {
+func replaceText(context innerContext, q0 int64, q1 int64, data []byte) error {
 	if q1 > q0 {
 		context.File.Delete(q0, q1)
 	}
@@ -896,7 +912,7 @@ func replaceText(context Context, q0 int64, q1 int64, data []byte) error {
 	return nil
 }
 
-func printPosn(context Context, mode int) error {
+func printPosn(context innerContext, mode int) error {
 	var text string
 	q0, q1 := context.File.Dot()
 	switch mode {
@@ -959,7 +975,7 @@ func printPosn(context Context, mode int) error {
 	return nil
 }
 
-func lineEndingCount(context Context, q0, q1 int64) (int64, int64, error) {
+func lineEndingCount(context innerContext, q0, q1 int64) (int64, int64, error) {
 	nl := int64(0)
 	start := q0
 	reader := context.File.Reader(q0, q1)

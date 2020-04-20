@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"reflect"
 	"testing"
@@ -11,7 +12,7 @@ import (
 	"github.com/fmpwizard/go-quilljs-delta/delta"
 )
 
-func run(command string, f *DeltaFile) error {
+func run(command string, f File) error {
 	cmd, err := Compile(command)
 	if err != nil {
 		return err
@@ -34,7 +35,7 @@ func debugDeltaString(t *testing.T, d delta.Delta) string {
 	return string(data)
 }
 
-func TestNormalCommand(t *testing.T) {
+func TestDelta(t *testing.T) {
 	content := *delta.New(nil).Insert("Code Emacs Vim Sam ed", nil)
 	e := NewDeltaFile(content)
 	err := run("/Emacs/a/ is not so great/", e)
@@ -42,7 +43,71 @@ func TestNormalCommand(t *testing.T) {
 		t.Fatal(err)
 	}
 	expectedContent := "Code Emacs is not so great Vim Sam ed"
-	actualContent := e.String(true)
+	actualContent := string(e.Bytes())
+	if actualContent != expectedContent {
+		t.Fatalf("Invalid result: expected: \"%s\", actual: \"%s\"", expectedContent, actualContent)
+	}
+}
+
+type testDelta struct {
+	content    delta.Delta
+	changes    delta.Delta
+	start, end int64
+}
+
+func newTestDelta(d delta.Delta) *testDelta {
+	return &testDelta{
+		content: d,
+	}
+}
+
+func (t *testDelta) Changes() delta.Delta {
+	return t.changes
+}
+
+func (t *testDelta) Select(start, end int64) {
+	t.start = start
+	t.end = end
+}
+
+func (t *testDelta) Dot() (start, end int64) {
+	start = t.start
+	end = t.end
+	return
+}
+
+func (t *testDelta) Len() (int64, error) {
+	return (&DeltaFile{
+		Delta: *t.content.Compose(t.changes),
+	}).Len()
+}
+
+func (t *testDelta) Reader(start, end int64) io.ReadSeeker {
+	return (&DeltaFile{
+		Delta: *t.content.Compose(t.changes),
+	}).Reader(start, end)
+}
+
+func (t *testDelta) Compose(d delta.Delta) error {
+	t.changes = *t.changes.Compose(d)
+	return nil
+}
+
+func (t *testDelta) String() string {
+	return string((&DeltaFile{
+		Delta: *t.content.Compose(t.changes),
+	}).Bytes())
+}
+
+func TestNormalCommand(t *testing.T) {
+	content := *delta.New(nil).Insert("Code Emacs Vim Sam ed", nil)
+	e := newTestDelta(content)
+	err := run("/Emacs/a/ is not so great/", e)
+	if err != nil {
+		t.Fatal(err)
+	}
+	expectedContent := "Code Emacs is not so great Vim Sam ed"
+	actualContent := e.String()
 	if actualContent != expectedContent {
 		t.Fatalf("Invalid result: expected: \"%s\", actual: \"%s\"", expectedContent, actualContent)
 	}
@@ -60,13 +125,13 @@ func TestContentWithEmbed(t *testing.T) {
 			Value: "image-uri",
 		}, nil).
 		Insert("acs Emacs Vim Sam ed", nil)
-	e := NewDeltaFile(content)
+	e := newTestDelta(content)
 	err := run("/Emacs/a/ is not so great/", e)
 	if err != nil {
 		t.Fatal(err)
 	}
 	expectedContent := "Code Em\x00acs Emacs is not so great Vim Sam ed"
-	actualContent := e.String(true)
+	actualContent := e.String()
 	if actualContent != expectedContent {
 		t.Fatalf("Invalid result: expected: \"%s\", actual: \"%s\"", expectedContent, actualContent)
 	}
@@ -79,13 +144,13 @@ func TestContentWithEmbed(t *testing.T) {
 
 func TestDeleteCommand(t *testing.T) {
 	content := *delta.New(nil).Insert("Code Emacs Vim Sam ed", nil)
-	e := NewDeltaFile(content)
+	e := newTestDelta(content)
 	err := run(",x/m /d", e)
 	if err != nil {
 		t.Fatal(err)
 	}
 	expectedContent := "Code Emacs ViSaed"
-	actualContent := e.String(true)
+	actualContent := e.String()
 	if actualContent != expectedContent {
 		t.Fatalf("Invalid result: expected: \"%s\", actual: \"%s\"", expectedContent, actualContent)
 	}
@@ -98,13 +163,13 @@ func TestDeleteCommand(t *testing.T) {
 
 func TestDeleteFromMultiLineCommand(t *testing.T) {
 	content := *delta.New(nil).Insert("1 45 1\n2 48 21\n3 45 1\n4 48 43\n5 45 1\n6 48 20\n", nil)
-	e := NewDeltaFile(content)
+	e := newTestDelta(content)
 	err := run(",x/^(5|6)/+-d", e)
 	if err != nil {
 		t.Fatal(err)
 	}
 	expectedContent := "1 45 1\n2 48 21\n3 45 1\n4 48 43\n"
-	actualContent := e.String(true)
+	actualContent := e.String()
 	if actualContent != expectedContent {
 		t.Fatalf("Invalid result: expected: \"%s\", actual: \"%s\"", expectedContent, actualContent)
 	}
@@ -362,10 +427,9 @@ the method in the madness that is the vi command structure.
 
 func TestMultipleCases(t *testing.T) {
 	for i, c := range testCases {
-		f := NewDeltaFile(*delta.New(nil).Insert(c.source, nil))
+		f := newTestDelta(*delta.New(nil).Insert(c.source, nil))
 		ctx := Context{
-			File:   f,
-			Commit: true,
+			File: f,
 		}
 		for j, run := range c.runs {
 			cmd, err := Compile(run.command)
@@ -378,7 +442,7 @@ func TestMultipleCases(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Error running command %s at (%d, %d): %v", run.command, i, j, err)
 			}
-			actualContent := f.String(false)
+			actualContent := f.String()
 			if actualContent != run.result {
 				t.Fatalf("Inconsistent result for command %s at (%d, %d)\nExpected: \"%s\"\nActual: \"%s\"\n", run.command, i, j, run.result, actualContent)
 			}

@@ -4,22 +4,21 @@ import (
 	"fmt"
 	"io"
 	"regexp"
+
+	"github.com/fmpwizard/go-quilljs-delta/delta"
 )
 
 type File interface {
-	Insert(p []byte, at int64) (n int64)
-	Delete(q0, q1 int64) (n int64)
 	Select(q0, q1 int64)
 	Dot() (q0, q1 int64)
-	Len() int64
-	Reader(q0, q1 int64) io.ReadSeeker
-	Commit() error
+	Len() (int64, error)
+	Reader(start, end int64) io.ReadSeeker
+	Compose(d delta.Delta) error
 }
 
 type Context struct {
 	File    File
 	Printer io.Writer
-	Commit  bool
 }
 
 func Compile(cmd string) (Cmd, error) {
@@ -35,15 +34,13 @@ func Compile(cmd string) (Cmd, error) {
 }
 
 func (c Cmd) Run(context Context) error {
-	err := cmdExec(c, context)
+	innerContext, err := newInnerContext(context)
 	if err != nil {
 		return err
 	}
-	if context.Commit {
-		err = context.File.Commit()
-		if err != nil {
-			return err
-		}
+	err = cmdExec(c, innerContext)
+	if err != nil {
+		return err
 	}
-	return nil
+	return innerContext.File.Commit()
 }
