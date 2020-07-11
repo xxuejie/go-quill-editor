@@ -9,6 +9,7 @@ import (
 
 type DeltaFile struct {
 	delta.Delta
+	changes    delta.Delta
 	start, end int64
 }
 
@@ -16,6 +17,10 @@ func NewDeltaFile(d delta.Delta) *DeltaFile {
 	return &DeltaFile{
 		Delta: d,
 	}
+}
+
+func (e *DeltaFile) Changes() delta.Delta {
+	return e.changes
 }
 
 func (e *DeltaFile) Select(start, end int64) {
@@ -49,6 +54,7 @@ func (e *DeltaFile) Reader(start, end int64) io.ReadSeeker {
 
 func (e *DeltaFile) Compose(d delta.Delta) error {
 	e.Delta = *e.Delta.Compose(d)
+	e.changes = *e.changes.Compose(d)
 	return nil
 }
 
